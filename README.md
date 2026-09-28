@@ -66,6 +66,8 @@ To make this single hardware register even faster and smarter:
 
 
 
+## System Architecture
+
 ```text
                   ┌───────────────────────┐
                   │  MATLAB / Simulink    │
@@ -108,8 +110,3 @@ To make this single hardware register even faster and smarter:
                               │
                               ▼
                        Cell SOC Output
-
-
-
-
-
