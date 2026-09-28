@@ -31,7 +31,7 @@ The architecture combines:
 ---
 ## Why This Project?
 
-Every battery pack in an electric vehicle (EV) or energy storage system (ESS) contains dozens to thousands of individual battery cells[cite: 2]. To ensure safety, prevent thermal runaway, and maximize battery lifespan, the Battery Management System (BMS) must constantly monitor the State-of-Charge (SOC)—essentially the "fuel gauge"—for **every single cell** in real time[cite: 2].
+Every battery pack in an electric vehicle (EV) or energy storage system (ESS) contains dozens to thousands of individual battery cells. To ensure safety, prevent thermal runaway, and maximize battery lifespan, the Battery Management System (BMS) must constantly monitor the State-of-Charge (SOC)—essentially the "fuel gauge"—for **every single cell** in real time[cite: 2].
 
 1. **Direct Measurement Is Impossible:** You cannot directly measure SOC with a sensor; it must be estimated mathematically using voltage, current, and temperature readings[cite: 2].
 2. **Standard Filters Are Flawed:** Basic algorithms like Extended Kalman Filters (EKF) fail during sudden acceleration because batteries exhibit heavy electrochemical non-linearities[cite: 1, 2].
@@ -110,3 +110,127 @@ To make this single hardware register even faster and smarter:
                               │
                               ▼
                        Cell SOC Output
+
+
+```
+### Core Architecture Concept
+
+A conventional multi-cell implementation replicates a complete filter for every battery cell. This project instead uses a **single SUKF datapath shared across multiple channels**. Individual cell states and covariance matrices are stored in Context SRAM and swapped as each channel is serviced.
+
+### Conventional (Parallel Replication)
+
+```text
+
+Cell 1 ──> UKF
+Cell 2 ──> UKF
+Cell 3 ──> UKF
+Cell 4 ──> UKF
+```
+
+### Proposed (Time-Interleaved Datapath)
+
+```text
+Cell 1 ─┐
+Cell 2 ─┤
+Cell 3 ─┼──> Shared SUKF Datapath ──► Context SRAM
+Cell 4 ─┘
+```
+
+---
+
+# Spherical Simplex UKF (SUKF)
+
+For an `n`-state system:
+
+* **Standard UKF:** `2n + 1` sigma points
+* **Spherical Simplex UKF:** `n + 2` sigma points
+
+For the 3-state battery model (`n = 3`) used in this project:
+
+* **Standard UKF:** 7 sigma points
+* **SUKF:** 5 sigma points
+
+This reduction lowers the computational load per iteration, facilitating real-time multi-cell multiplexing on hardware.
+
+---
+
+# Colored-Noise Modeling
+
+Real battery sensor measurements exhibit temporally correlated noise caused by sensor drift, thermal gradients, and EMI coupling.
+
+The project augments the state-space formulation with an **AR(1) process model**, allowing the SUKF to evaluate SOC tracking under correlated noise conditions.
+
+---
+
+# Innovation-Gated Scheduling
+
+The scheduler inspects incoming cell voltage residuals. Channels with small innovation values bypass full covariance matrix updates, prioritizing execution bandwidth for dynamically active cells.
+
+---
+
+# Hardware Implementation
+
+| Component / Feature    | Details                                            |
+| ---------------------- | -------------------------------------------------- |
+| **Target Device**      | Xilinx Zynq-7000 (`XC7Z020` / PYNQ-Z1 or ZedBoard) |
+| **Synthesis Tools**    | Vitis HLS, Vivado Design Suite                     |
+| **Languages**          | C++, Verilog HDL, Python (PYNQ driver)             |
+| **Interconnect**       | AXI4-Lite, AXI-DMA, AXI4-Stream                    |
+| **Datapath Precision** | Fixed-point arithmetic (`ap_fixed<X,Y>`)           |
+
+---
+
+# Hardware-in-the-Loop (HIL) Validation
+
+Recorded battery current and voltage dynamic drive cycles are streamed from host memory to the FPGA via AXI-DMA. The coprocessor outputs SOC predictions, which are streamed back to compare against MATLAB/Simulink ground truth.
+
+```text
+MATLAB / Dataset ──► Host Memory ──► AXI-DMA ──► [ Zynq-7000 FPGA ] ──► SOC Output ──► Validation
+```
+
+### Evaluated Drive Cycles
+
+* **UDDS:** Urban Dynamometer Driving Schedule
+* **US06:** High-Acceleration Supplemental FTP
+
+---
+
+# Results
+
+> [!NOTE]
+> Results will be added following completion of setup and experimental runs:
+>
+> * MATLAB/Simulink reference model validation
+> * Vitis HLS synthesis & timing closure
+> * Fixed-point quantization analysis
+> * Multi-cell scaling & resource utilization measurements
+> * HIL test execution
+
+### Resource Utilization (Target: XC7Z020)
+
+| Metric                     | Utilized | Available | Utilization % |
+| -------------------------- | -------: | --------: | ------------: |
+| **LUT**                    |       -- |    53,200 |            -- |
+| **FF**                     |       -- |   106,400 |            -- |
+| **DSP48E**                 |       -- |       220 |            -- |
+| **BRAM**                   |       -- |       140 |            -- |
+| **Max Frequency (`Fmax`)** |   -- MHz |        -- |            -- |
+
+---
+
+# Roadmap
+
+* [x] Repository setup and structural specification
+* [ ] 2-RC battery model parameterization
+* [ ] Reference EKF and Standard UKF implementation
+* [ ] SUKF algorithm implementation
+* [ ] AR(1) colored-noise state augmentation
+* [ ] MATLAB simulation & validation
+* [ ] Vitis HLS SUKF kernel development
+* [ ] Fixed-point precision optimization (`ap_fixed`)
+* [ ] Context SRAM & multi-cell interleaving logic
+* [ ] Innovation-gated scheduler implementation
+* [ ] Vivado block design & synthesis
+* [ ] PYNQ AXI-DMA driver setup
+* [ ] Real-time HIL drive-cycle testing (UDDS / US06)
+* [ ] Data collection & manuscript reporting
